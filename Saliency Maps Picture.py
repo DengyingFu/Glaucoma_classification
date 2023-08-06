@@ -1,72 +1,30 @@
-import numpy as np
-import torch
 import torchvision
-import torchvision.transforms as T
-
-import matplotlib.pyplot as plt
-from cs231n.data_utils import load_imagenet_val
-from cs231n.image_utils import SQUEEZENET_MEAN, SQUEEZENET_STD
 from PIL import Image
+import matplotlib.pyplot as plt
+from model import Model
+import torch
 
-# 辅助函数
+# #导入数据集
+# data_set = torchvision.datasets.MNIST("./MNIST",train=False,transform=torchvision.transforms.ToTensor())
+# img,target = data_set[9365]
 
+img = Image.open("4.png")
+Ts = torchvision.transforms.Compose(
+    [torchvision.transforms.Grayscale(num_output_channels=1),   #转换为灰度图像
+     torchvision.transforms.Resize((28,28)),
+     torchvision.transforms.ToTensor()]
+)
 
-def preprocess(img, size=224):
-    transform = T.Compose([
-        T.Resize(size),
-        T.ToTensor(),
-        T.Normalize(mean=SQUEEZENET_MEAN.tolist(),
-                    std=SQUEEZENET_STD.tolist()),
-        T.Lambda(lambda x: x[None]),
-    ])
-    return transform(img)
-
-
-def deprocess(img, should_rescale=True):
-    transform = T.Compose([
-        T.Lambda(lambda x: x[0]),
-        T.Normalize(mean=[0, 0, 0], std=(1.0 / SQUEEZENET_STD).tolist()),
-        T.Normalize(mean=(-SQUEEZENET_MEAN).tolist(), std=[1, 1, 1]),
-        T.Lambda(rescale) if should_rescale else T.Lambda(lambda x: x),
-        T.ToPILImage(),
-    ])
-    return transform(img)
+img= Ts(img)
 
 
-def rescale(x):
-    low, high = x.min(), x.max()
-    x_rescaled = (x - low) / (high - low)
-    return x_rescaled
+
+target = 4
+
+img = torch.reshape(img,[-1,1,28,28])
 
 
-def blur_image(X, sigma=1):
-    X_np = X.cpu().clone().numpy()
-    X_np = gaussian_filter1d(X_np, sigma, axis=2)
-    X_np = gaussian_filter1d(X_np, sigma, axis=3)
-    X.copy_(torch.Tensor(X_np).type_as(X))
-    return X
-
-
-# 加载预训练模型
-# Download and load the pretrained SqueezeNet model.
-model = torchvision.models.squeezenet1_1(pretrained=True)
-
-# We don't want to train the model, so tell PyTorch not to compute gradients
-# with respect to model parameters.
-for param in model.parameters():
-    param.requires_grad = False
-
-
-# 加载一些图片
-X, y, class_names = load_imagenet_val(num=5)
-
-plt.figure(figsize=(12, 6))
-for i in range(5):
-    plt.subplot(1, 5, i + 1)
-    plt.imshow(X[i])
-    plt.title(class_names[y[i]])
-    plt.axis('off')
-plt.gcf().tight_layout()
+model = torch.load("model_4.pth")  #导入模型
 
 
 
@@ -86,13 +44,14 @@ def compute_saliency_maps(X, y, model):
     model.eval()
 
     # 确保X是需要gradient
+
     X.requires_grad_()
 
     saliency = None
 
-    logits = model.forward(X)
-    logits = logits.gather(1, y.view(-1, 1)).squeeze()  # 得到正确分类
-    logits.backward(torch.FloatTensor([1., 1., 1., 1., 1.]))  # 只计算正确分类部分的loss
+    logits = model(X)
+    logits = logits[0, y]
+    logits.backward(torch.FloatTensor([1.]))  # 只计算正确分类部分的loss
 
     saliency = abs(X.grad.data)  # 返回X的梯度绝对值大小
     saliency, _ = torch.max(saliency, dim=1)
@@ -102,27 +61,37 @@ def compute_saliency_maps(X, y, model):
 
 def show_saliency_maps(X, y):
     # Convert X and y from numpy arrays to Torch Tensors
-    X_tensor = torch.cat([preprocess(Image.fromarray(x)) for x in X], dim=0)
-    y_tensor = torch.LongTensor(y)
+    # Compute saliency map for the image in X
 
-    # Compute saliency maps for images in X
-    saliency = compute_saliency_maps(X_tensor, y_tensor, model)
+    y = torch.tensor([y])
+    saliency = compute_saliency_maps(X, y, model)
 
     # Convert the saliency map from Torch Tensor to numpy array and show images
-    # and saliency maps together.
+    # and saliency map together.
     saliency = saliency.numpy()
-    N = X.shape[0]
-    for i in range(N):
-        plt.subplot(2, N, i + 1)
-        plt.imshow(X[i])
-        plt.axis('off')
-        plt.title(class_names[y[i]])
-        plt.subplot(2, N, N + i + 1)
-        plt.imshow(saliency[i], cmap=plt.cm.hot)
-        plt.axis('off')
-        plt.gcf().set_size_inches(12, 5)
+
+
+    plt.figure(figsize=(12, 5))
+
+    T = torchvision.transforms.ToPILImage()
+    X = torch.reshape(X,[1, 28, 28])
+    X = T(X)
+
+
+    plt.subplot(1, 2, 1)
+    plt.imshow(X, cmap='gray')  # Assuming X is of shape (1, 1, H, W)
+    plt.axis('off')
+    plt.title("Digit {}".format(y))
+
+    plt.subplot(1, 2, 2)
+    plt.imshow(saliency, cmap='Greens')
+    plt.axis('off')
+
+    plt.tight_layout()
     plt.show()
 
 
-show_saliency_maps(X, y)
+print(target)
+show_saliency_maps(img, target)
+
 
